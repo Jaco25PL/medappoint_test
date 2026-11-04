@@ -7,6 +7,7 @@ QA challenge for Light-it. User story under test:
 ## What's in this repo
 
 - `docs/functional-testing-report.md` - Part 1: test strategy, test cases, bugs, improvements, go / no-go.
+- `docs/exploratory-findings.md` - raw notes from exploring the database, API and web app. The report is built from these.
 - `sql/queries.sql` - Part 2: SQL queries, each one commented.
 - `postman/` - Part 3: Postman collection and environment.
 - `e2e/` - Part 4: UI automation with Playwright + pytest.
