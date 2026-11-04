@@ -1,2 +1,25 @@
+# Secrets
 .env
+
+# Challenge source material (not part of the deliverable)
 data/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Test artifacts
+reports/
+test-results/
+
+# Node (newman)
+node_modules/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
