@@ -1,9 +1,3 @@
-"""Base class for all Page Objects.
-
-Page Objects expose user-level actions and locators. Assertions live in the
-tests (or in explicit `expect_*` helpers) so pages stay reusable.
-"""
-
 from playwright.sync_api import Page
 
 
@@ -18,6 +12,5 @@ class BasePage:
     def url(self) -> str:
         return f"{self.base_url}{self.PATH}"
 
-    def open(self) -> "BasePage":
+    def open(self) -> None:
         self.page.goto(self.url)
-        return self

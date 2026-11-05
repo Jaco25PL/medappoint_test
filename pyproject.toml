@@ -5,9 +5,11 @@ description = "QA challenge deliverables for MedAppoint: functional testing, SQL
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
-testpaths = ["e2e/tests"]
+testpaths = ["tests/ui"]
 pythonpath = ["."]
 addopts = [
+    "-ra",
+    "--import-mode=importlib",
     "--browser=chromium",
     "--tracing=retain-on-failure",
     "--screenshot=only-on-failure",
@@ -15,6 +17,7 @@ addopts = [
     "--html=reports/report.html",
     "--self-contained-html",
 ]
+log_level = "INFO"
 markers = [
     "smoke: fast checks that the environment and critical paths are up",
     "reschedule: tests covering the reschedule user story",

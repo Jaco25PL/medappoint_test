@@ -1,0 +1,8 @@
+LOGIN = "/api/auth/login"
+CURRENT_USER = "/api/users/me"
+APPOINTMENTS = "/api/appointments"
+APPOINTMENT = "/api/appointments/{id}"
+RESCHEDULE_APPOINTMENT = "/api/appointments/{id}/reschedule"
+CANCEL_APPOINTMENT = "/api/appointments/{id}/cancel"
+DOCTORS = "/api/doctors"
+DOCTOR_AVAILABILITY = "/api/doctors/{id}/availability"

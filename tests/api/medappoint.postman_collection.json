@@ -1,0 +1,1276 @@
+{
+  "info": {
+    "name": "MedAppoint - Reschedule Flow",
+    "description": "API tests for the user story: \"As a patient, I want to reschedule an existing appointment to another available time slot, without having to cancel and book from scratch\"\n\n**How to run:** set `api_base_url`, `app_email` and `app_password` in the environment and run the whole collection in order. Nothing else is needed\n\n**Authentication** is automatic. A collection level script logs in, caches the token and only logs in again when it is about to expire (the login endpoint has a rate limit)\n\n**Test data** is created by the collection itself (doctor, date and time are picked at random from the API) and deleted at the end in `99 - Cleanup`\n\n**Every request** also checks that there is no server error (5xx). Every `Edge - ` request also reads the appointment again to check it did not change\n\n**Not covered here, with more time:** year 0001, February 30, a slot that already passed today, a slot outside the doctor hours, a slot with only spaces, SQL injection text in the slot, malformed JSON and an id bigger than the database allows. They were tried by hand during exploration and the results are in `docs/exploratory-findings.md`\n\n**Failing tests are expected.** Each failing test is a bug found in the API, for example the reschedule response returns the old data, past dates and invalid time slots are accepted, and a taken slot can be booked again. See `docs/functional-testing-report.md`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Automatic authentication: obtain and cache a JWT before any request that needs it.",
+          "const isLoginRequest = pm.request.url.getPath().endsWith('/api/auth/login');",
+          "// Requests inheriting the collection auth have no own auth object, so only skip explicit 'noauth'.",
+          "const requiresAuth = !(pm.request.auth && pm.request.auth.type === 'noauth');",
+          "",
+          "if (!isLoginRequest && requiresAuth) {",
+          "    const token = pm.collectionVariables.get('token');",
+          "    const tokenExp = Number(pm.collectionVariables.get('token_exp') || 0);",
+          "    const now = Math.floor(Date.now() / 1000);",
+          "    const isValid = token && tokenExp - 60 > now; // renew 60s before expiry",
+          "",
+          "    if (!isValid) {",
+          "        const baseUrl = pm.environment.get('api_base_url');",
+          "        const email = pm.environment.get('app_email');",
+          "        const password = pm.environment.get('app_password');",
+          "        if (!baseUrl || !email || !password) {",
+          "            throw new Error('Missing environment variables: api_base_url, app_email and app_password are required.');",
+          "        }",
+          "",
+          "        pm.sendRequest({",
+          "            url: `${baseUrl}/api/auth/login`,",
+          "            method: 'POST',",
+          "            header: { 'Content-Type': 'application/json' },",
+          "            body: { mode: 'raw', raw: JSON.stringify({ email, password }) }",
+          "        }, (err, res) => {",
+          "            if (err || res.code !== 200) {",
+          "                throw new Error(`Automatic login failed: ${err || res.code + ' ' + res.text()}`);",
+          "            }",
+          "            const newToken = res.json().token;",
+          "            pm.collectionVariables.set('token', newToken);",
+          "",
+          "            // Read the expiry from the JWT payload; fall back to 5 minutes if it can't be decoded.",
+          "            let exp = now + 300;",
+          "            try {",
+          "                const payload = JSON.parse(atob(newToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+          "                if (payload.exp) { exp = payload.exp; }",
+          "            } catch (e) { /* keep fallback */ }",
+          "            pm.collectionVariables.set('token_exp', String(exp));",
+          "        });",
+          "    }",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('No server error (5xx)', () => pm.expect(pm.response.code).to.be.below(500));",
+          "",
+          "// Edge cases must not change the appointment. After each one, the appointment is read again:",
+          "// if it changed, the test fails and the appointment is put back so the next case starts clean",
+          "if (pm.info.requestName.startsWith('Edge - ')) {",
+          "    const baseUrl = pm.environment.get('api_base_url');",
+          "    const id = pm.collectionVariables.get('appointment_id');",
+          "    const expectedDate = pm.collectionVariables.get('new_date');",
+          "    const expectedSlot = pm.collectionVariables.get('new_slot');",
+          "    const auth = { key: 'Authorization', value: 'Bearer ' + pm.collectionVariables.get('token') };",
+          "",
+          "    pm.sendRequest({ url: `${baseUrl}/api/appointments/${id}`, method: 'GET', header: [auth] }, (err, res) => {",
+          "        const saved = res.json();",
+          "        const unchanged = saved.appointment_date.slice(0, 10) === expectedDate && saved.time_slot === expectedSlot;",
+          "        pm.test('Appointment was not changed', () => pm.expect(unchanged, `saved ${saved.appointment_date} ${saved.time_slot}`).to.be.true);",
+          "        if (!unchanged) {",
+          "            pm.sendRequest({",
+          "                url: `${baseUrl}/api/appointments/${id}/reschedule`,",
+          "                method: 'PUT',",
+          "                header: [auth, { key: 'Content-Type', value: 'application/json' }],",
+          "                body: { mode: 'raw', raw: JSON.stringify({ appointment_date: expectedDate, time_slot: expectedSlot }) }",
+          "            });",
+          "        }",
+          "    });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "00 - Auth",
+      "item": [
+        {
+          "name": "Login - valid credentials",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "pm.test('Response contains a JWT token', () => {",
+                  "    pm.expect(body.token).to.be.a('string');",
+                  "    pm.expect(body.token.split('.')).to.have.lengthOf(3);",
+                  "});",
+                  "",
+                  "pm.test('Response does not leak credentials', () => {",
+                  "    pm.expect(pm.response.text()).to.not.include(pm.environment.get('app_password'));",
+                  "});",
+                  "",
+                  "// Reuse this token (and its expiry) for the following requests, avoiding extra logins.",
+                  "pm.collectionVariables.set('token', body.token);",
+                  "let exp = Math.floor(Date.now() / 1000) + 300;",
+                  "try {",
+                  "    const payload = JSON.parse(atob(body.token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+                  "    if (payload.exp) { exp = payload.exp; }",
+                  "} catch (e) { /* keep fallback */ }",
+                  "pm.collectionVariables.set('token_exp', String(exp));",
+                  "",
+                  "if (pm.response.code !== 200) {",
+                  "    console.log('Stopping the run: ' + pm.info.requestName + ' returned ' + pm.response.code);",
+                  "    pm.execution.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{app_email}}\",\n  \"password\": \"{{app_password}}\"\n}"
+            },
+            "url": "{{api_base_url}}/api/auth/login"
+          }
+        },
+        {
+          "name": "Get current user (auth check)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const user = pm.response.json();",
+                  "pm.test('Returns the authenticated patient', () => {",
+                  "    pm.expect(user.email).to.eql(pm.environment.get('app_email'));",
+                  "    pm.expect(user.id).to.be.a('number');",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('patient_id', user.id);",
+                  "",
+                  "if (pm.response.code !== 200) {",
+                  "    console.log('Stopping the run: ' + pm.info.requestName + ' returned ' + pm.response.code);",
+                  "    pm.execution.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/users/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 - Setup",
+      "description": "Gets everything the reschedule needs and creates a fresh appointment for this run, so the collection never depends on existing data",
+      "item": [
+        {
+          "name": "Get active doctors",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "",
+                  "if (pm.response.code !== 200) {",
+                  "    console.log('Stopping the run: ' + pm.info.requestName + ' returned ' + pm.response.code);",
+                  "    pm.execution.setNextRequest(null);",
+                  "}",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const doctors = pm.response.json();",
+                  "pm.test('Returns a non empty list of doctors', () => pm.expect(doctors).to.be.an('array').that.is.not.empty);",
+                  "pm.test('Each doctor has id, name and specialty', () => {",
+                  "    doctors.forEach(doctor => {",
+                  "        pm.expect(doctor.id).to.be.a('number');",
+                  "        pm.expect(doctor.first_name).to.be.a('string').and.not.empty;",
+                  "        pm.expect(doctor.last_name).to.be.a('string').and.not.empty;",
+                  "        pm.expect(doctor.specialty).to.be.a('string').and.not.empty;",
+                  "    });",
+                  "});",
+                  "",
+                  "const doctor = doctors[Math.floor(Math.random() * doctors.length)];",
+                  "pm.collectionVariables.set('doctor_id', doctor.id);",
+                  "console.log(`Picked doctor ${doctor.id} - ${doctor.first_name} ${doctor.last_name}`);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/doctors"
+          }
+        },
+        {
+          "name": "Get availability for the original date",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A random date 2 to 8 months ahead lowers the chance of hitting other candidates' bookings",
+                  "const daysAhead = 60 + Math.floor(Math.random() * 200);",
+                  "const date = new Date(Date.now() + daysAhead * 86400000).toISOString().slice(0, 10);",
+                  "pm.collectionVariables.set('original_date', date);",
+                  "pm.collectionVariables.set('run_tag', 'qa-postman-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "",
+                  "if (pm.response.code !== 200) {",
+                  "    console.log('Stopping the run: ' + pm.info.requestName + ' returned ' + pm.response.code);",
+                  "    pm.execution.setNextRequest(null);",
+                  "}",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const slots = pm.response.json().time_slots;",
+                  "pm.test('Returns a non empty list of time slots', () => pm.expect(slots).to.be.an('array').that.is.not.empty);",
+                  "pm.test('Every slot is a valid HH:MM time', () => {",
+                  "    slots.forEach(slot => pm.expect(slot).to.match(/^([01]\\d|2[0-3]):[0-5]\\d$/));",
+                  "});",
+                  "pm.test('Slots are not repeated', () => pm.expect(new Set(slots).size).to.eql(slots.length));",
+                  "",
+                  "pm.collectionVariables.set('original_slot', slots[Math.floor(Math.random() * slots.length)]);",
+                  "pm.collectionVariables.set('slots', JSON.stringify(slots));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/doctors/{{doctor_id}}/availability?date={{original_date}}"
+          }
+        },
+        {
+          "name": "Create the appointment to reschedule",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "",
+                  "if (pm.response.code !== 201) {",
+                  "    console.log('Stopping the run: ' + pm.info.requestName + ' returned ' + pm.response.code);",
+                  "    pm.execution.setNextRequest(null);",
+                  "}",
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "",
+                  "const appointment = pm.response.json();",
+                  "pm.test('Saves what was sent', () => {",
+                  "    pm.expect(appointment.doctor_id).to.eql(Number(pm.collectionVariables.get('doctor_id')));",
+                  "    pm.expect(appointment.appointment_date.slice(0, 10)).to.eql(pm.collectionVariables.get('original_date'));",
+                  "    pm.expect(appointment.time_slot).to.eql(pm.collectionVariables.get('original_slot'));",
+                  "    pm.expect(appointment.notes).to.eql(pm.collectionVariables.get('run_tag'));",
+                  "});",
+                  "pm.test('Belongs to the logged in patient', () => {",
+                  "    pm.expect(appointment.patient_id).to.eql(Number(pm.collectionVariables.get('patient_id')));",
+                  "});",
+                  "pm.test('New appointment is active', () => pm.expect(appointment.status).to.eql('active'));",
+                  "",
+                  "pm.collectionVariables.set('appointment_id', appointment.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api_base_url}}/api/appointments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"doctor_id\": {{doctor_id}},\n  \"appointment_date\": \"{{original_date}}\",\n  \"time_slot\": \"{{original_slot}}\",\n  \"notes\": \"{{run_tag}}\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - Reschedule (happy path)",
+      "description": "Moves the appointment to a free slot and checks with a GET that the change was really saved. The PUT response alone is not trusted",
+      "item": [
+        {
+          "name": "Get the appointment before rescheduling",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const appointment = pm.response.json();",
+                  "pm.test('Matches the appointment that was created', () => {",
+                  "    pm.expect(appointment.id).to.eql(Number(pm.collectionVariables.get('appointment_id')));",
+                  "    pm.expect(appointment.appointment_date.slice(0, 10)).to.eql(pm.collectionVariables.get('original_date'));",
+                  "    pm.expect(appointment.time_slot).to.eql(pm.collectionVariables.get('original_slot'));",
+                  "});",
+                  "pm.test('Date is returned as YYYY-MM-DD, as the API docs say', () => {",
+                  "    pm.expect(appointment.appointment_date).to.match(/^\\d{4}-\\d{2}-\\d{2}$/);",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('original_updated_at', appointment.updated_at);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}"
+          }
+        },
+        {
+          "name": "Get availability for the new date",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const original = new Date(pm.collectionVariables.get('original_date'));",
+                  "const daysLater = 1 + Math.floor(Math.random() * 30);",
+                  "pm.collectionVariables.set('new_date', new Date(original.getTime() + daysLater * 86400000).toISOString().slice(0, 10));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "",
+                  "if (pm.response.code !== 200) {",
+                  "    console.log('Stopping the run: ' + pm.info.requestName + ' returned ' + pm.response.code);",
+                  "    pm.execution.setNextRequest(null);",
+                  "}",
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const slots = pm.response.json().time_slots;",
+                  "pm.test('Returns a non empty list of time slots', () => pm.expect(slots).to.be.an('array').that.is.not.empty);",
+                  "",
+                  "pm.collectionVariables.set('new_slot', slots[Math.floor(Math.random() * slots.length)]);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/doctors/{{doctor_id}}/availability?date={{new_date}}"
+          }
+        },
+        {
+          "name": "Reschedule to a free slot",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const body = pm.response.json();",
+                  "pm.test('Response confirms the reschedule', () => pm.expect(body.success).to.be.true);",
+                  "pm.test('Response returns the same appointment', () => {",
+                  "    pm.expect(body.appointment.id).to.eql(Number(pm.collectionVariables.get('appointment_id')));",
+                  "});",
+                  "pm.test('Response shows the new date and time', () => {",
+                  "    pm.expect(body.appointment.appointment_date.slice(0, 10)).to.eql(pm.collectionVariables.get('new_date'));",
+                  "    pm.expect(body.appointment.time_slot).to.eql(pm.collectionVariables.get('new_slot'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}/reschedule",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointment_date\": \"{{new_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get the appointment after rescheduling",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "",
+                  "const appointment = pm.response.json();",
+                  "pm.test('New date and time were saved', () => {",
+                  "    pm.expect(appointment.appointment_date.slice(0, 10)).to.eql(pm.collectionVariables.get('new_date'));",
+                  "    pm.expect(appointment.time_slot).to.eql(pm.collectionVariables.get('new_slot'));",
+                  "});",
+                  "pm.test('Doctor, patient, notes and status did not change', () => {",
+                  "    pm.expect(appointment.doctor_id).to.eql(Number(pm.collectionVariables.get('doctor_id')));",
+                  "    pm.expect(appointment.patient_id).to.eql(Number(pm.collectionVariables.get('patient_id')));",
+                  "    pm.expect(appointment.notes).to.eql(pm.collectionVariables.get('run_tag'));",
+                  "    pm.expect(appointment.status).to.eql('active');",
+                  "});",
+                  "pm.test('updated_at changed after the reschedule', () => {",
+                  "    pm.expect(appointment.updated_at).to.not.eql(pm.collectionVariables.get('original_updated_at'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}"
+          }
+        },
+        {
+          "name": "Availability after rescheduling",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('The new slot is no longer offered', () => {",
+                  "    pm.expect(pm.response.json().time_slots).to.not.include(pm.collectionVariables.get('new_slot'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/doctors/{{doctor_id}}/availability?date={{new_date}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - Edge cases",
+      "description": "Invalid requests against the rescheduled appointment. Each one must be rejected and must leave the appointment as it was (checked automatically after every request)",
+      "item": [
+        {
+          "name": "Edge - Past date",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('edge_date', new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Response explains the error', () => pm.expect(pm.response.json().error).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}/reschedule",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointment_date\": \"{{edge_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Edge - Date is not a date",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('edge_date', 'not-a-date');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Response explains the error', () => pm.expect(pm.response.json().error).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}/reschedule",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointment_date\": \"{{edge_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Edge - Time slot out of range (25:99)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('edge_slot', '25:99');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Response explains the error', () => pm.expect(pm.response.json().error).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}/reschedule",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointment_date\": \"{{new_date}}\",\n  \"time_slot\": \"{{edge_slot}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Edge - Missing time slot",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Response explains the error', () => pm.expect(pm.response.json().error).to.be.a('string').and.not.empty);",
+                  "pm.test('Error says which fields are required', () => {",
+                  "    pm.expect(pm.response.json().error).to.eql(pm.collectionVariables.get('msg_required_fields'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}/reschedule",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointment_date\": \"{{new_date}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Create a second appointment to take a slot",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const newDate = new Date(pm.collectionVariables.get('new_date'));",
+                  "pm.collectionVariables.set('taken_date', new Date(newDate.getTime() + 2 * 86400000).toISOString().slice(0, 10));",
+                  "const slots = JSON.parse(pm.collectionVariables.get('slots'));",
+                  "pm.collectionVariables.set('taken_slot', slots[Math.floor(Math.random() * slots.length)]);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('taken_appointment_id', pm.response.json().id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api_base_url}}/api/appointments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"doctor_id\": {{doctor_id}},\n  \"appointment_date\": \"{{taken_date}}\",\n  \"time_slot\": \"{{taken_slot}}\",\n  \"notes\": \"{{run_tag}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Edge - Slot already taken (same doctor, same date and time)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Rejected because the slot is taken (400 or 409)', () => pm.expect(pm.response.code).to.be.oneOf([400, 409]));",
+                  "pm.test('Response explains the error', () => pm.expect(pm.response.json().error).to.be.a('string').and.not.empty);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}/reschedule",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointment_date\": \"{{taken_date}}\",\n  \"time_slot\": \"{{taken_slot}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Edge - Appointment of another patient",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The lowest appointment id that is not ours belongs to another patient (the seed data starts at 1)",
+                  "pm.sendRequest({",
+                  "    url: `${pm.environment.get('api_base_url')}/api/appointments`,",
+                  "    method: 'GET',",
+                  "    header: [{ key: 'Authorization', value: 'Bearer ' + pm.collectionVariables.get('token') }]",
+                  "}, (err, res) => {",
+                  "    const ownIds = res.json().map(appointment => appointment.id);",
+                  "    let candidate = 1;",
+                  "    while (ownIds.includes(candidate)) { candidate++; }",
+                  "    pm.collectionVariables.set('other_appointment_id', candidate);",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Error is Forbidden', () => pm.expect(pm.response.json().error).to.eql(pm.collectionVariables.get('msg_forbidden')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api_base_url}}/api/appointments/{{other_appointment_id}}/reschedule",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointment_date\": \"{{new_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Edge - Appointment that does not exist",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Error is Not found', () => pm.expect(pm.response.json().error).to.eql(pm.collectionVariables.get('msg_not_found')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api_base_url}}/api/appointments/2147483647/reschedule",
+            "description": "2147483647 is the largest id a PostgreSQL integer can hold",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointment_date\": \"{{new_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Edge - No token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Error is Unauthorized', () => pm.expect(pm.response.json().error).to.eql(pm.collectionVariables.get('msg_unauthorized')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}/reschedule",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointment_date\": \"{{new_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 - Appointment states",
+      "description": "Only active appointments with an active doctor should be rescheduled. Cancelled and completed use the seeded appointments of the test patient, and are put back to their original date and time if they get changed by mistake. The inactive doctor case creates its own appointment and deletes it",
+      "item": [
+        {
+          "name": "Reschedule a cancelled appointment",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.sendRequest({",
+                  "    url: `${pm.environment.get('api_base_url')}/api/appointments`,",
+                  "    method: 'GET',",
+                  "    header: [{ key: 'Authorization', value: 'Bearer ' + pm.collectionVariables.get('token') }]",
+                  "}, (err, res) => {",
+                  "    const found = res.json().find(appointment => appointment.status === 'cancelled');",
+                  "    pm.collectionVariables.set('state_id', found ? found.id : 0);",
+                  "    pm.collectionVariables.set('state_date', found ? found.appointment_date.slice(0, 10) : '');",
+                  "    pm.collectionVariables.set('state_slot', found ? found.time_slot : '');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!Number(pm.collectionVariables.get('state_id'))) {",
+                  "    pm.test.skip('The test patient has no cancelled appointment to try', () => {});",
+                  "} else {",
+                  "    pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "    pm.test('Response explains that a cancelled appointment cannot be rescheduled', () => {",
+                  "        pm.expect(pm.response.json().error).to.be.a('string').and.not.empty;",
+                  "    });",
+                  "}",
+                  "",
+                  "if (pm.response.code < 300) {",
+                  "    pm.sendRequest({",
+                  "        url: `${pm.environment.get('api_base_url')}/api/appointments/${pm.collectionVariables.get('state_id')}/reschedule`,",
+                  "        method: 'PUT',",
+                  "        header: [",
+                  "            { key: 'Authorization', value: 'Bearer ' + pm.collectionVariables.get('token') },",
+                  "            { key: 'Content-Type', value: 'application/json' }",
+                  "        ],",
+                  "        body: { mode: 'raw', raw: JSON.stringify({",
+                  "            appointment_date: pm.collectionVariables.get('state_date'),",
+                  "            time_slot: pm.collectionVariables.get('state_slot')",
+                  "        }) }",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api_base_url}}/api/appointments/{{state_id}}/reschedule",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointment_date\": \"{{new_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Reschedule a completed appointment",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.sendRequest({",
+                  "    url: `${pm.environment.get('api_base_url')}/api/appointments`,",
+                  "    method: 'GET',",
+                  "    header: [{ key: 'Authorization', value: 'Bearer ' + pm.collectionVariables.get('token') }]",
+                  "}, (err, res) => {",
+                  "    const found = res.json().find(appointment => appointment.status === 'completed');",
+                  "    pm.collectionVariables.set('state_id', found ? found.id : 0);",
+                  "    pm.collectionVariables.set('state_date', found ? found.appointment_date.slice(0, 10) : '');",
+                  "    pm.collectionVariables.set('state_slot', found ? found.time_slot : '');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!Number(pm.collectionVariables.get('state_id'))) {",
+                  "    pm.test.skip('The test patient has no completed appointment to try', () => {});",
+                  "} else {",
+                  "    pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "    pm.test('Response explains that a completed appointment cannot be rescheduled', () => {",
+                  "        pm.expect(pm.response.json().error).to.be.a('string').and.not.empty;",
+                  "    });",
+                  "}",
+                  "",
+                  "if (pm.response.code < 300) {",
+                  "    pm.sendRequest({",
+                  "        url: `${pm.environment.get('api_base_url')}/api/appointments/${pm.collectionVariables.get('state_id')}/reschedule`,",
+                  "        method: 'PUT',",
+                  "        header: [",
+                  "            { key: 'Authorization', value: 'Bearer ' + pm.collectionVariables.get('token') },",
+                  "            { key: 'Content-Type', value: 'application/json' }",
+                  "        ],",
+                  "        body: { mode: 'raw', raw: JSON.stringify({",
+                  "            appointment_date: pm.collectionVariables.get('state_date'),",
+                  "            time_slot: pm.collectionVariables.get('state_slot')",
+                  "        }) }",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api_base_url}}/api/appointments/{{state_id}}/reschedule",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointment_date\": \"{{new_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Create an appointment with an inactive doctor",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The doctors list only shows active doctors, so the inactive one is found by asking for each id",
+                  "const baseUrl = pm.environment.get('api_base_url');",
+                  "const auth = { key: 'Authorization', value: 'Bearer ' + pm.collectionVariables.get('token') };",
+                  "const findInactiveDoctor = (id) => {",
+                  "    pm.sendRequest({ url: `${baseUrl}/api/doctors/${id}`, method: 'GET', header: [auth] }, (err, res) => {",
+                  "        if (res.code !== 200) { pm.collectionVariables.set('inactive_doctor_id', 0); return; }",
+                  "        if (res.json().is_active === false) { pm.collectionVariables.set('inactive_doctor_id', id); return; }",
+                  "        findInactiveDoctor(id + 1);",
+                  "    });",
+                  "};",
+                  "findInactiveDoctor(1);",
+                  "",
+                  "const newDate = new Date(pm.collectionVariables.get('new_date'));",
+                  "pm.collectionVariables.set('inactive_date', new Date(newDate.getTime() + 5 * 86400000).toISOString().slice(0, 10));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('inactive_appointment_id', pm.response.code === 201 ? pm.response.json().id : 0);",
+                  "",
+                  "if (!Number(pm.collectionVariables.get('inactive_doctor_id'))) {",
+                  "    pm.test.skip('There is no inactive doctor to try', () => {});",
+                  "} else {",
+                  "    pm.test('Booking with an inactive doctor is rejected (400)', () => pm.response.to.have.status(400));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api_base_url}}/api/appointments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"doctor_id\": {{inactive_doctor_id}},\n  \"appointment_date\": \"{{inactive_date}}\",\n  \"time_slot\": \"{{new_slot}}\",\n  \"notes\": \"{{run_tag}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Reschedule an appointment with an inactive doctor",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!Number(pm.collectionVariables.get('inactive_appointment_id'))) {",
+                  "    pm.test.skip('No appointment with an inactive doctor could be created', () => {});",
+                  "} else {",
+                  "    pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "    pm.test('Response explains that the doctor is inactive', () => {",
+                  "        pm.expect(pm.response.json().error).to.be.a('string').and.not.empty;",
+                  "    });",
+                  "",
+                  "    pm.sendRequest({",
+                  "        url: `${pm.environment.get('api_base_url')}/api/appointments/${pm.collectionVariables.get('inactive_appointment_id')}`,",
+                  "        method: 'DELETE',",
+                  "        header: [{ key: 'Authorization', value: 'Bearer ' + pm.collectionVariables.get('token') }]",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{api_base_url}}/api/appointments/{{inactive_appointment_id}}/reschedule",
+            "description": "Only runs when the previous request managed to create the appointment. The reschedule keeps the same doctor, so it should be blocked while that doctor is inactive",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointment_date\": \"{{inactive_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "99 - Cleanup",
+      "description": "Deletes everything this run created, so the shared database is left as it was",
+      "item": [
+        {
+          "name": "Delete the rescheduled appointment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response confirms the delete', () => pm.expect(pm.response.json().success).to.be.true);",
+                  "",
+                  "pm.sendRequest({",
+                  "    url: `${pm.environment.get('api_base_url')}/api/appointments/${pm.collectionVariables.get('appointment_id')}`,",
+                  "    method: 'GET',",
+                  "    header: [{ key: 'Authorization', value: 'Bearer ' + pm.collectionVariables.get('token') }]",
+                  "}, (err, res) => {",
+                  "    pm.test('Appointment is gone (404)', () => pm.expect(res.code).to.eql(404));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}"
+          }
+        },
+        {
+          "name": "Delete the second appointment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response confirms the delete', () => pm.expect(pm.response.json().success).to.be.true);",
+                  "",
+                  "pm.sendRequest({",
+                  "    url: `${pm.environment.get('api_base_url')}/api/appointments/${pm.collectionVariables.get('taken_appointment_id')}`,",
+                  "    method: 'GET',",
+                  "    header: [{ key: 'Authorization', value: 'Bearer ' + pm.collectionVariables.get('token') }]",
+                  "}, (err, res) => {",
+                  "    pm.test('Appointment is gone (404)', () => pm.expect(res.code).to.eql(404));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{api_base_url}}/api/appointments/{{taken_appointment_id}}"
+          }
+        },
+        {
+          "name": "No test data is left",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('No appointment from this run is left', () => {",
+                  "    const left = pm.response.json().filter(appointment => appointment.notes === pm.collectionVariables.get('run_tag'));",
+                  "    pm.expect(left.map(appointment => appointment.id)).to.be.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{api_base_url}}/api/appointments"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "token_exp",
+      "value": ""
+    },
+    {
+      "key": "patient_id",
+      "value": ""
+    },
+    {
+      "key": "run_tag",
+      "value": ""
+    },
+    {
+      "key": "doctor_id",
+      "value": ""
+    },
+    {
+      "key": "slots",
+      "value": ""
+    },
+    {
+      "key": "original_date",
+      "value": ""
+    },
+    {
+      "key": "original_slot",
+      "value": ""
+    },
+    {
+      "key": "original_updated_at",
+      "value": ""
+    },
+    {
+      "key": "appointment_id",
+      "value": ""
+    },
+    {
+      "key": "new_date",
+      "value": ""
+    },
+    {
+      "key": "new_slot",
+      "value": ""
+    },
+    {
+      "key": "edge_date",
+      "value": ""
+    },
+    {
+      "key": "edge_slot",
+      "value": ""
+    },
+    {
+      "key": "taken_date",
+      "value": ""
+    },
+    {
+      "key": "taken_slot",
+      "value": ""
+    },
+    {
+      "key": "taken_appointment_id",
+      "value": ""
+    },
+    {
+      "key": "other_appointment_id",
+      "value": ""
+    },
+    {
+      "key": "state_id",
+      "value": ""
+    },
+    {
+      "key": "state_date",
+      "value": ""
+    },
+    {
+      "key": "state_slot",
+      "value": ""
+    },
+    {
+      "key": "inactive_doctor_id",
+      "value": ""
+    },
+    {
+      "key": "inactive_date",
+      "value": ""
+    },
+    {
+      "key": "inactive_appointment_id",
+      "value": ""
+    },
+    {
+      "key": "msg_required_fields",
+      "value": "appointment_date and time_slot are required"
+    },
+    {
+      "key": "msg_forbidden",
+      "value": "Forbidden"
+    },
+    {
+      "key": "msg_not_found",
+      "value": "Not found"
+    },
+    {
+      "key": "msg_unauthorized",
+      "value": "Unauthorized"
+    }
+  ]
+}
