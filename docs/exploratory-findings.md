@@ -64,6 +64,10 @@ API
 
 - Availability without a date also returns the same 10 slots. Availability for a doctor that doesn't exist returns 404, good
 
+- LOGOUT DOES NOT INVALIDATE THE TOKEN. POST /api/auth/logout returns 200 "Logged out successfully", but the same token still works after that (GET /api/users/me returns 200). The token lasts 24 hours, so on a shared computer someone else could keep using the session. Logout only clears the token in the browser
+
+- Security checks that passed: no response returns the password, appointments, payments and notifications only return my own data, and a forged token with "alg: none" is rejected (403)
+
 - Tried SQL injection on login (' OR '1'='1, ' OR 1=1 --, my email followed by ' --). All of them return 401 "Invalid email or password", same as a wrong password. The backend uses Prisma, which sends values as parameters, so this is expected. Still worth testing on fields that save free text, like time_slot and notes
 
 --------
