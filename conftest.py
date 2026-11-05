@@ -80,3 +80,13 @@ def future_appointment(api: ApiClient) -> Generator[Appointment, None, None]:
     logger.info("Created %s", appointment)
     yield appointment
     api.delete_appointment(appointment.id)
+
+
+@pytest.fixture
+def booking_notes(api: ApiClient) -> Generator[str, None, None]:
+    # The appointment is created by the UI, so it is found by its unique notes to delete it
+    notes = f"qa-auto-{uuid.uuid4().hex[:8]}"
+    yield notes
+    appointment = api.find_appointment_by_notes(notes)
+    if appointment:
+        api.delete_appointment(appointment.id)

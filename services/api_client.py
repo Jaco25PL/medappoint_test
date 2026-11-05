@@ -56,6 +56,14 @@ class ApiClient:
         assert response.status == 201, f"Create failed: {response.status} {response.text()}"
         return Appointment.from_json(response.json())
 
+    def get_appointments(self) -> list[Appointment]:
+        response = self._context.get(endpoints.APPOINTMENTS)
+        assert response.ok, f"Get appointments failed: {response.status} {response.text()}"
+        return [Appointment.from_json(appointment) for appointment in response.json()]
+
+    def find_appointment_by_notes(self, notes: str) -> Appointment | None:
+        return next((a for a in self.get_appointments() if a.notes == notes), None)
+
     def get_appointment(self, appointment_id: int) -> Appointment:
         response = self.get_appointment_response(appointment_id)
         assert response.ok, f"Get failed: {response.status} {response.text()}"

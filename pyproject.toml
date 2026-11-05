@@ -21,6 +21,7 @@ log_level = "INFO"
 markers = [
     "smoke: fast checks that the environment and critical paths are up",
     "reschedule: tests covering the reschedule user story",
+    "booking: tests covering booking a new appointment",
 ]
 
 [tool.ruff]
