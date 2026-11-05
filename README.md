@@ -6,7 +6,7 @@ QA challenge for Light-it. User story under test:
 
 ## What's in this repo
 
-- `docs/functional-testing-report.pdf` - Part 1: test strategy, test cases, bugs, improvements, go / no-go
+- `docs/Functional-Testing-Report-Reschedule.pdf` - Part 1: test strategy, test cases, bugs, improvements, go / no-go
 - `docs/exploratory-findings.md` - raw notes from exploring the database, API and web app. The report is built from these
 - `sql/queries.sql` - Part 2: SQL queries, each one commented
 - `tests/api/` - Part 3: Postman collection and environment
@@ -61,9 +61,15 @@ The commands below (`pytest`, `ruff`, `npx`) are the same in both shells
 
 ## Run the UI tests
 
+The three flows covered:
+1. Log in through the UI (`tests/ui/auth/`)
+2. Book an appointment (`tests/ui/appointments/test_book_appointment.py`)
+3. Reschedule an appointment, including form validation and invalid dates (`tests/ui/appointments/test_reschedule.py`)
+
 ```bash
 pytest              # all tests
 pytest -m smoke     # smoke tests only
+pytest -m booking   # booking tests only
 pytest --headed     # see the browser
 ```
 
@@ -123,7 +129,15 @@ What the collection does:
 
 Not covered, with more time: year 0001, February 30, a slot that already passed today, a slot outside the doctor hours, a slot with only spaces, SQL injection text in the slot, malformed JSON and an id bigger than the database allows. They were tried by hand during exploration, results in `docs/exploratory-findings.md`
 
-Some tests fail on purpose: each failing test is a bug in the API (see `docs/functional-testing-report.pdf`). A green run is not the goal, the goal is that every failure points to a real problem
+Some tests fail on purpose: each failing test is a bug in the API (see `docs/Functional-Testing-Report-Reschedule.pdf`). A green run is not the goal, the goal is that every failure points to a real problem
+
+## CI
+
+`.github/workflows/tests.yml` runs on every push to main (and by hand from the Actions tab): ruff, the UI tests and the Postman collection, in two parallel jobs
+
+It needs two repository secrets (Settings > Secrets and variables > Actions): `APP_EMAIL` and `APP_PASSWORD`
+
+The UI test report is saved as an artifact of the run. The Postman job fails on purpose while the known bugs are open, each failing assertion is a bug
 
 ## Code quality
 
