@@ -7,7 +7,8 @@
 -- The patient is found by email instead of a carcoded id, so the query still works if the db is
 -- seeded again and teh id changes
 -- time_slot braks the tie when two appoinments are on the same day
--- The email is the test patient account given for this challenge. Change it to run the query for another patient SELECT
+-- The email is the test patient account given for this challenge. Change it to run the query for another patient 
+SELECT
     d.first_name || ' ' || d.last_name AS doctor_name,
     a.appointment_date,
     a.time_slot,
