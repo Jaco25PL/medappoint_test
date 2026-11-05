@@ -1,0 +1,40 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  WEB_URL: https://light-it-qa-challenge.vercel.app
+  API_BASE_URL: https://qa-challenge-backend.vercel.app
+  APP_EMAIL: ${{ secrets.APP_EMAIL }}
+  APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+
+jobs:
+  ui-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: playwright install --with-deps chromium
+      - run: ruff check .
+      - run: pytest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-test-report
+          path: reports/
+
+  api-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: >
+          npx -y newman@6 run tests/api/medappoint.postman_collection.json
+          -e tests/api/medappoint.postman_environment.json
+          --env-var "app_email=$APP_EMAIL"
+          --env-var "app_password=$APP_PASSWORD"
