@@ -55,6 +55,13 @@ Copy-Item .env.example .env
 
 Then fill in the credentials in `.env`. If a value has special characters (`#`, `!`), wrap it in single quotes
 
+To run against another environment, create another file like `.env.staging` with that environment's values and point to it with `ENV_FILE`. Both pytest and the Newman script use it:
+
+```bash
+ENV_FILE=.env.staging pytest                       # Bash
+$env:ENV_FILE=".env.staging"; pytest               # PowerShell
+```
+
 If PowerShell blocks the activation script, run this once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 
 The commands below (`pytest`, `ruff`, `npx`) are the same in both shells
@@ -82,6 +89,7 @@ How the UI tests are built:
 - After acting in the UI, tests check the backend with a GET, so a UI that says "success" but saved nothing is caught
 - Elements are found by role or label, the way a user sees them, not by CSS classes
 - No hardcoded URLs, credentials or messages. URLs and credentials come from `.env` and messages from `messages/`
+- Each test has a title (starts with Test) and a description (starts with Verify), set with the `title` and `description` markers and shown as columns in the HTML report. Postman requests follow the same rule, with the description in the Docs tab
 - Tests that fail because of a known bug are marked `xfail` with the bug as the reason. They show up as "xfailed" in the report, and if the bug gets fixed the test fails on purpose so the mark gets removed
 
 ### Element naming convention

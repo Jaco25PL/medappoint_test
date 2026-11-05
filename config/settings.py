@@ -11,7 +11,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(PROJECT_ROOT / ".env")
+# ENV_FILE picks another environment, for example ENV_FILE=.env.staging (default: .env)
+ENV_FILE = PROJECT_ROOT / os.getenv("ENV_FILE", ".env")
+load_dotenv(ENV_FILE)
 
 
 def _require(name: str) -> str:
@@ -19,7 +21,7 @@ def _require(name: str) -> str:
     if not value:
         raise RuntimeError(
             f"Missing required environment variable '{name}'. "
-            "Copy .env.example to .env and fill it in."
+            f"Copy .env.example to {ENV_FILE.name} and fill it in."
         )
     return value
 

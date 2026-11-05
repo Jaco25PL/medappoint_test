@@ -1,5 +1,7 @@
 # Secrets
 .env
+.env.*
+!.env.example
 
 # Challenge source material (not part of the deliverable)
 data/
