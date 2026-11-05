@@ -104,9 +104,13 @@ Page elements use a prefix that tells what kind of element they are. To add a ne
 
 In Postman: import both files from `tests/api/`, select the "MedAppoint - QA" environment, fill in `app_email` and `app_password`, and run the whole collection in order
 
-From the command line with Newman (needs Node.js, `npx` downloads Newman the first time)
+From the command line with Newman (needs Node.js, `npx` downloads Newman the first time). The short way, which takes the credentials from `.env`:
 
-Same command in Bash and PowerShell:
+```bash
+python tests/api/run_newman.py
+```
+
+Or the full command, without `.env` (same in Bash and PowerShell):
 
 ```bash
 npx newman run tests/api/medappoint.postman_collection.json -e tests/api/medappoint.postman_environment.json --env-var 'app_email=<email>' --env-var 'app_password=<password>'
