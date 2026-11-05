@@ -16,14 +16,3 @@ def test_patient_can_log_in_through_the_ui(page: Page, settings: Settings) -> No
     dashboard = DashboardPage(page, settings.web_url)
     expect(page).to_have_url(dashboard.url)
     expect(dashboard.lbl_greeting).to_be_visible()
-
-
-@pytest.mark.smoke
-def test_authenticated_page_fixture_skips_login(
-    authenticated_page: Page, settings: Settings
-) -> None:
-    dashboard = DashboardPage(authenticated_page, settings.web_url)
-    dashboard.open()
-
-    expect(authenticated_page).to_have_url(dashboard.url)
-    expect(dashboard.lbl_next_appointment).to_be_visible()

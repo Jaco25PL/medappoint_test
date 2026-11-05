@@ -13,11 +13,3 @@ class DashboardPage(BasePage):
         return self.page.get_by_role(
             "heading", name=re.compile(r"^Good (morning|afternoon|evening)")
         )
-
-    @property
-    def lbl_next_appointment(self) -> Locator:
-        return self.page.get_by_role("heading", name="Your next appointment")
-
-    @property
-    def btn_logout(self) -> Locator:
-        return self.page.get_by_role("button", name=re.compile("Logout"))
