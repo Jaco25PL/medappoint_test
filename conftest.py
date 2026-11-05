@@ -1,10 +1,4 @@
-"""Shared pytest fixtures.
-
-UI tests that are not about login authenticate through the API and inject the
-token into localStorage, where the front-end keeps it. Test data is created
-through the API before each test and deleted afterwards.
-"""
-
+import html
 import logging
 import random
 import uuid
@@ -90,3 +84,23 @@ def booking_notes(api: ApiClient) -> Generator[str, None, None]:
     appointment = api.find_appointment_by_notes(notes)
     if appointment:
         api.delete_appointment(appointment.id)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
+    # Copies the title and description markers to the report so the HTML report can show them
+    outcome = yield
+    report = outcome.get_result()
+    for name in ("title", "description"):
+        marker = item.get_closest_marker(name)
+        setattr(report, name, marker.args[0] if marker else "")
+
+
+def pytest_html_results_table_header(cells: list) -> None:
+    cells.insert(1, "<th>Title</th>")
+    cells.insert(2, "<th>Description</th>")
+
+
+def pytest_html_results_table_row(report: pytest.TestReport, cells: list) -> None:
+    cells.insert(1, f"<td>{html.escape(getattr(report, 'title', ''))}</td>")
+    cells.insert(2, f"<td>{html.escape(getattr(report, 'description', ''))}</td>")

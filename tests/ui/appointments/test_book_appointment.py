@@ -11,6 +11,10 @@ from utils.dates import days_from_today
 
 
 @pytest.mark.booking
+@pytest.mark.title("Test book an appointment")
+@pytest.mark.description(
+    "Verify a booking made in the UI is saved with the chosen doctor, date and time"
+)
 def test_book_appointment(
     authenticated_page: Page,
     settings: Settings,

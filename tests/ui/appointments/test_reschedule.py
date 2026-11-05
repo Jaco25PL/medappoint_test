@@ -13,6 +13,8 @@ from utils.dates import as_card_date, days_from_today
 
 
 @pytest.mark.reschedule
+@pytest.mark.title("Test reschedule to a free slot")
+@pytest.mark.description("Verify the card and the saved appointment show the new date and time")
 @pytest.mark.xfail(
     reason="BUG-04: The card keeps the old date and time after a reschedule", strict=True
 )
@@ -43,6 +45,10 @@ def test_reschedule_to_free_slot(
 
 
 @pytest.mark.reschedule
+@pytest.mark.title("Test reschedule form required fields")
+@pytest.mark.description(
+    "Verify an empty date or time is blocked and the appointment does not change"
+)
 @pytest.mark.parametrize(
     ("new_date", "expected_error"),
     [
@@ -71,6 +77,10 @@ def test_reschedule_requires_date_and_time(
 
 
 @pytest.mark.reschedule
+@pytest.mark.title("Test reschedule to an invalid date")
+@pytest.mark.description(
+    "Verify past dates and year 1 are rejected and the appointment does not change"
+)
 @pytest.mark.parametrize(
     "new_date",
     [

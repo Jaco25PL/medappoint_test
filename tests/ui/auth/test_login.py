@@ -7,6 +7,8 @@ from pages.dashboard.dashboard_page import DashboardPage
 
 
 @pytest.mark.smoke
+@pytest.mark.title("Test patient login")
+@pytest.mark.description("Verify a patient can log in through the UI and lands on the dashboard")
 def test_patient_can_log_in_through_the_ui(page: Page, settings: Settings) -> None:
     login_page = LoginPage(page, settings.web_url)
     login_page.open()

@@ -19,6 +19,8 @@ addopts = [
 ]
 log_level = "INFO"
 markers = [
+    "title(text): short title of the test, starts with Test",
+    "description(text): what the test checks, starts with Verify",
     "smoke: fast checks that the environment and critical paths are up",
     "reschedule: tests covering the reschedule user story",
     "booking: tests covering booking a new appointment",

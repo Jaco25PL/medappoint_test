@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "MedAppoint - Reschedule Flow",
-    "description": "API tests for the user story: \"As a patient, I want to reschedule an existing appointment to another available time slot, without having to cancel and book from scratch\"\n\n**How to run:** set `api_base_url`, `app_email` and `app_password` in the environment and run the whole collection in order. Nothing else is needed\n\n**Authentication** is automatic. A collection level script logs in, caches the token and only logs in again when it is about to expire (the login endpoint has a rate limit)\n\n**Test data** is created by the collection itself (doctor, date and time are picked at random from the API) and deleted at the end in `99 - Cleanup`\n\n**Every request** also checks that there is no server error (5xx). Every `Edge - ` request also reads the appointment again to check it did not change\n\n**Not covered here, with more time:** year 0001, February 30, a slot that already passed today, a slot outside the doctor hours, a slot with only spaces, SQL injection text in the slot, malformed JSON and an id bigger than the database allows. They were tried by hand during exploration and the results are in `docs/exploratory-findings.md`\n\n**Failing tests are expected.** Each failing test is a bug found in the API, for example the reschedule response returns the old data, past dates and invalid time slots are accepted, and a taken slot can be booked again. See `docs/Functional-Testing-Report-Reschedule.pdf`",
+    "description": "API tests for the user story: \"As a patient, I want to reschedule an existing appointment to another available time slot, without having to cancel and book from scratch\"\n\n**How to run:** set `api_base_url`, `app_email` and `app_password` in the environment and run the whole collection in order. Nothing else is needed\n\n**Authentication** is automatic. A collection level script logs in, caches the token and only logs in again when it is about to expire (the login endpoint has a rate limit)\n\n**Test data** is created by the collection itself (doctor, date and time are picked at random from the API) and deleted at the end in `99 - Cleanup`\n\n**Every request** also checks that there is no server error (5xx). Every `Test edge case - ` request also reads the appointment again to check it did not change\n\n**Not covered here, with more time:** year 0001, February 30, a slot that already passed today, a slot outside the doctor hours, a slot with only spaces, SQL injection text in the slot, malformed JSON and an id bigger than the database allows. They were tried by hand during exploration and the results are in `docs/exploratory-findings.md`\n\n**Failing tests are expected.** Each failing test is a bug found in the API, for example the reschedule response returns the old data, past dates and invalid time slots are accepted, and a taken slot can be booked again. See `docs/Functional-Testing-Report-Reschedule.pdf`",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -73,7 +73,7 @@
           "",
           "// Edge cases must not change the appointment. After each one, the appointment is read again:",
           "// if it changed, the test fails and the appointment is put back so the next case starts clean",
-          "if (pm.info.requestName.startsWith('Edge - ')) {",
+          "if (pm.info.requestName.startsWith('Test edge case - ')) {",
           "    const baseUrl = pm.environment.get('api_base_url');",
           "    const id = pm.collectionVariables.get('appointment_id');",
           "    const expectedDate = pm.collectionVariables.get('new_date');",
@@ -103,7 +103,7 @@
       "name": "00 - Auth",
       "item": [
         {
-          "name": "Login - valid credentials",
+          "name": "Test login with valid credentials",
           "event": [
             {
               "listen": "test",
@@ -154,11 +154,12 @@
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{app_email}}\",\n  \"password\": \"{{app_password}}\"\n}"
             },
-            "url": "{{api_base_url}}/api/auth/login"
+            "url": "{{api_base_url}}/api/auth/login",
+            "description": "Verify the login returns a JWT token and does not leak the password"
           }
         },
         {
-          "name": "Get current user (auth check)",
+          "name": "Test get the current user",
           "event": [
             {
               "listen": "test",
@@ -186,7 +187,8 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{api_base_url}}/api/users/me"
+            "url": "{{api_base_url}}/api/users/me",
+            "description": "Verify the token belongs to the test patient"
           }
         }
       ]
@@ -196,7 +198,7 @@
       "description": "Gets everything the reschedule needs and creates a fresh appointment for this run, so the collection never depends on existing data",
       "item": [
         {
-          "name": "Get active doctors",
+          "name": "Test get active doctors",
           "event": [
             {
               "listen": "test",
@@ -231,11 +233,12 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{api_base_url}}/api/doctors"
+            "url": "{{api_base_url}}/api/doctors",
+            "description": "Verify the doctors list has id, name and specialty for each doctor"
           }
         },
         {
-          "name": "Get availability for the original date",
+          "name": "Test get availability for the original date",
           "event": [
             {
               "listen": "prerequest",
@@ -278,11 +281,12 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{api_base_url}}/api/doctors/{{doctor_id}}/availability?date={{original_date}}"
+            "url": "{{api_base_url}}/api/doctors/{{doctor_id}}/availability?date={{original_date}}",
+            "description": "Verify availability returns valid HH:MM slots with no repeats"
           }
         },
         {
-          "name": "Create the appointment to reschedule",
+          "name": "Test create the appointment to reschedule",
           "event": [
             {
               "listen": "test",
@@ -325,7 +329,8 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"doctor_id\": {{doctor_id}},\n  \"appointment_date\": \"{{original_date}}\",\n  \"time_slot\": \"{{original_slot}}\",\n  \"notes\": \"{{run_tag}}\"\n}"
-            }
+            },
+            "description": "Verify a new appointment is saved as sent, active and owned by the patient"
           }
         }
       ]
@@ -335,7 +340,7 @@
       "description": "Moves the appointment to a free slot and checks with a GET that the change was really saved. The PUT response alone is not trusted",
       "item": [
         {
-          "name": "Get the appointment before rescheduling",
+          "name": "Test get the appointment before rescheduling",
           "event": [
             {
               "listen": "test",
@@ -362,11 +367,12 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}"
+            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}",
+            "description": "Verify the appointment matches what was created and the date follows the API docs"
           }
         },
         {
-          "name": "Get availability for the new date",
+          "name": "Test get availability for the new date",
           "event": [
             {
               "listen": "prerequest",
@@ -402,11 +408,12 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{api_base_url}}/api/doctors/{{doctor_id}}/availability?date={{new_date}}"
+            "url": "{{api_base_url}}/api/doctors/{{doctor_id}}/availability?date={{new_date}}",
+            "description": "Verify the doctor has slots on the new date"
           }
         },
         {
-          "name": "Reschedule to a free slot",
+          "name": "Test reschedule to a free slot",
           "event": [
             {
               "listen": "test",
@@ -440,11 +447,12 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"appointment_date\": \"{{new_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
-            }
+            },
+            "description": "Verify the reschedule succeeds and the response shows the new date and time"
           }
         },
         {
-          "name": "Get the appointment after rescheduling",
+          "name": "Test get the appointment after rescheduling",
           "event": [
             {
               "listen": "test",
@@ -474,11 +482,12 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}"
+            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}",
+            "description": "Verify the new date and time were saved and nothing else changed"
           }
         },
         {
-          "name": "Availability after rescheduling",
+          "name": "Test availability after rescheduling",
           "event": [
             {
               "listen": "test",
@@ -496,7 +505,8 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{api_base_url}}/api/doctors/{{doctor_id}}/availability?date={{new_date}}"
+            "url": "{{api_base_url}}/api/doctors/{{doctor_id}}/availability?date={{new_date}}",
+            "description": "Verify the new slot is no longer offered"
           }
         }
       ]
@@ -506,7 +516,7 @@
       "description": "Invalid requests against the rescheduled appointment. Each one must be rejected and must leave the appointment as it was (checked automatically after every request)",
       "item": [
         {
-          "name": "Edge - Past date",
+          "name": "Test edge case - Past date",
           "event": [
             {
               "listen": "prerequest",
@@ -540,11 +550,12 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"appointment_date\": \"{{edge_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
-            }
+            },
+            "description": "Verify a past date is rejected and the appointment does not change"
           }
         },
         {
-          "name": "Edge - Date is not a date",
+          "name": "Test edge case - Date is not a date",
           "event": [
             {
               "listen": "prerequest",
@@ -578,11 +589,12 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"appointment_date\": \"{{edge_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
-            }
+            },
+            "description": "Verify an invalid date returns 400, not a server error"
           }
         },
         {
-          "name": "Edge - Time slot out of range (25:99)",
+          "name": "Test edge case - Time slot out of range (25:99)",
           "event": [
             {
               "listen": "prerequest",
@@ -616,11 +628,12 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"appointment_date\": \"{{new_date}}\",\n  \"time_slot\": \"{{edge_slot}}\"\n}"
-            }
+            },
+            "description": "Verify a time slot that does not exist is rejected"
           }
         },
         {
-          "name": "Edge - Missing time slot",
+          "name": "Test edge case - Missing time slot",
           "event": [
             {
               "listen": "test",
@@ -648,11 +661,12 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"appointment_date\": \"{{new_date}}\"\n}"
-            }
+            },
+            "description": "Verify a missing field returns 400 with a clear message"
           }
         },
         {
-          "name": "Create a second appointment to take a slot",
+          "name": "Test create a second appointment to take a slot",
           "event": [
             {
               "listen": "prerequest",
@@ -689,11 +703,12 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"doctor_id\": {{doctor_id}},\n  \"appointment_date\": \"{{taken_date}}\",\n  \"time_slot\": \"{{taken_slot}}\",\n  \"notes\": \"{{run_tag}}\"\n}"
-            }
+            },
+            "description": "Verify the appointment used to block a slot is created"
           }
         },
         {
-          "name": "Edge - Slot already taken (same doctor, same date and time)",
+          "name": "Test edge case - Slot already taken (same doctor, same date and time)",
           "event": [
             {
               "listen": "test",
@@ -718,11 +733,12 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"appointment_date\": \"{{taken_date}}\",\n  \"time_slot\": \"{{taken_slot}}\"\n}"
-            }
+            },
+            "description": "Verify a slot that is already booked is rejected"
           }
         },
         {
-          "name": "Edge - Appointment of another patient",
+          "name": "Test edge case - Appointment of another patient",
           "event": [
             {
               "listen": "prerequest",
@@ -766,11 +782,12 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"appointment_date\": \"{{new_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
-            }
+            },
+            "description": "Verify a patient cannot reschedule someone else's appointment (403)"
           }
         },
         {
-          "name": "Edge - Appointment that does not exist",
+          "name": "Test edge case - Appointment that does not exist",
           "event": [
             {
               "listen": "test",
@@ -792,7 +809,7 @@
               }
             ],
             "url": "{{api_base_url}}/api/appointments/2147483647/reschedule",
-            "description": "2147483647 is the largest id a PostgreSQL integer can hold",
+            "description": "Verify an unknown appointment returns 404\n\n2147483647 is the largest id a PostgreSQL integer can hold",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"appointment_date\": \"{{new_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
@@ -800,7 +817,7 @@
           }
         },
         {
-          "name": "Edge - No token",
+          "name": "Test edge case - No token",
           "event": [
             {
               "listen": "test",
@@ -828,7 +845,8 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"appointment_date\": \"{{new_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
-            }
+            },
+            "description": "Verify the reschedule needs a token (401)"
           }
         }
       ]
@@ -838,7 +856,7 @@
       "description": "Only active appointments with an active doctor should be rescheduled. Cancelled and completed use the seeded appointments of the test patient, and are put back to their original date and time if they get changed by mistake. The inactive doctor case creates its own appointment and deletes it",
       "item": [
         {
-          "name": "Reschedule a cancelled appointment",
+          "name": "Test reschedule a cancelled appointment",
           "event": [
             {
               "listen": "prerequest",
@@ -902,11 +920,12 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"appointment_date\": \"{{new_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
-            }
+            },
+            "description": "Verify a cancelled appointment cannot be rescheduled"
           }
         },
         {
-          "name": "Reschedule a completed appointment",
+          "name": "Test reschedule a completed appointment",
           "event": [
             {
               "listen": "prerequest",
@@ -970,11 +989,12 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"appointment_date\": \"{{new_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
-            }
+            },
+            "description": "Verify a completed appointment cannot be rescheduled"
           }
         },
         {
-          "name": "Create an appointment with an inactive doctor",
+          "name": "Test create an appointment with an inactive doctor",
           "event": [
             {
               "listen": "prerequest",
@@ -1026,11 +1046,12 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"doctor_id\": {{inactive_doctor_id}},\n  \"appointment_date\": \"{{inactive_date}}\",\n  \"time_slot\": \"{{new_slot}}\",\n  \"notes\": \"{{run_tag}}\"\n}"
-            }
+            },
+            "description": "Verify an inactive doctor cannot get new appointments"
           }
         },
         {
-          "name": "Reschedule an appointment with an inactive doctor",
+          "name": "Test reschedule an appointment with an inactive doctor",
           "event": [
             {
               "listen": "test",
@@ -1064,7 +1085,7 @@
               }
             ],
             "url": "{{api_base_url}}/api/appointments/{{inactive_appointment_id}}/reschedule",
-            "description": "Only runs when the previous request managed to create the appointment. The reschedule keeps the same doctor, so it should be blocked while that doctor is inactive",
+            "description": "Verify an appointment with an inactive doctor cannot be rescheduled\n\nOnly runs when the previous request managed to create the appointment. The reschedule keeps the same doctor, so it should be blocked while that doctor is inactive",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"appointment_date\": \"{{inactive_date}}\",\n  \"time_slot\": \"{{new_slot}}\"\n}"
@@ -1078,7 +1099,7 @@
       "description": "Deletes everything this run created, so the shared database is left as it was",
       "item": [
         {
-          "name": "Delete the rescheduled appointment",
+          "name": "Test delete the rescheduled appointment",
           "event": [
             {
               "listen": "test",
@@ -1102,11 +1123,12 @@
           "request": {
             "method": "DELETE",
             "header": [],
-            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}"
+            "url": "{{api_base_url}}/api/appointments/{{appointment_id}}",
+            "description": "Verify the appointment is deleted and returns 404 afterwards"
           }
         },
         {
-          "name": "Delete the second appointment",
+          "name": "Test delete the second appointment",
           "event": [
             {
               "listen": "test",
@@ -1130,11 +1152,12 @@
           "request": {
             "method": "DELETE",
             "header": [],
-            "url": "{{api_base_url}}/api/appointments/{{taken_appointment_id}}"
+            "url": "{{api_base_url}}/api/appointments/{{taken_appointment_id}}",
+            "description": "Verify the second appointment is deleted and returns 404 afterwards"
           }
         },
         {
-          "name": "No test data is left",
+          "name": "Test no test data is left",
           "event": [
             {
               "listen": "test",
@@ -1153,7 +1176,8 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{api_base_url}}/api/appointments"
+            "url": "{{api_base_url}}/api/appointments",
+            "description": "Verify no appointment created by this run is left in the database"
           }
         }
       ]
