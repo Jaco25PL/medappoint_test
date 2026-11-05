@@ -100,22 +100,10 @@ In Postman: import both files from `tests/api/`, select the "MedAppoint - QA" en
 
 From the command line with Newman (needs Node.js, `npx` downloads Newman the first time)
 
-Bash:
+Same command in Bash and PowerShell:
 
 ```bash
-npx newman run tests/api/medappoint.postman_collection.json \
-  -e tests/api/medappoint.postman_environment.json \
-  --env-var 'app_email=<email>' \
-  --env-var 'app_password=<password>'
-```
-
-PowerShell:
-
-```powershell
-npx newman run tests/api/medappoint.postman_collection.json `
-  -e tests/api/medappoint.postman_environment.json `
-  --env-var 'app_email=<email>' `
-  --env-var 'app_password=<password>'
+npx newman run tests/api/medappoint.postman_collection.json -e tests/api/medappoint.postman_environment.json --env-var 'app_email=<email>' --env-var 'app_password=<password>'
 ```
 
 Use single quotes around the values in both shells, so characters like `!`, `#` or `$` in the password are not changed by the shell
