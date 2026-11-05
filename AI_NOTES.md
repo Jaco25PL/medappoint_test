@@ -24,3 +24,10 @@ Postman collection:
 - Claude generated the collection JSON and helped me decide the test cases and coverage, both the happy path and the edge cases
 - I imported it into Postman, reviewed every request and test by hand, and refined it
 - I ran it myself with Newman to confirm it works end to end and that every failure is a real bug
+
+How I write tests with AI:
+- First I give it context: the user story, my exploratory findings and the test cases I already wrote
+- Then, for each test, I write the title and a short summary of what it should check and why. For example: "reschedule form requires date and time: a parametrized test with the input and the expected error message, so a failure shows which case broke"
+- AI writes the code from that, following the project structure and conventions
+- I review it, run it, and check that it fails for the right reason. Tests marked as expected failures were also run with --runxfail to confirm they fail because of the bug and not because of something else
+- This can be improved having a command like /shape-test where we can add conventions to create test cases, so every test starts from the same template and I only write the intent 
